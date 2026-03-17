@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paperbridge"
+version = "0.1.0"
+description = "Literature bridge library — unified publication search, metadata retrieval, and citation aggregation"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Neil Anthony"}]
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "requests>=2.31",
+    "loguru>=0.7",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+docs = ["pdfplumber>=0.10", "pymupdf>=1.23", "pymupdf4llm>=0.0.10", "trafilatura>=1.6"]
+bibtex = ["bibtexparser>=1.4"]
+all = ["paperbridge[docs,bibtex]"]
+
+[dependency-groups]
+dev = ["pytest>=7.0", "pytest-mock", "ruff", "mypy"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
