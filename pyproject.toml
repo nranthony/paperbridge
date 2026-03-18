@@ -25,6 +25,8 @@ all = ["paperbridge[docs,bibtex]"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-mock", "ruff", "mypy"]
+notebook = ["ipykernel", "ipywidgets"]
+all-dev = [{include-group = "dev"}, {include-group = "notebook"}]
 
 [tool.setuptools.packages.find]
 where = ["src"]

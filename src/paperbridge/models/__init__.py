@@ -11,6 +11,7 @@ from paperbridge.models.article import (
     iter_keywords,
 )
 from paperbridge.models.arxiv import ArXivPreprint, ArXivSearchResult
+from paperbridge.models.citation_graph import CitationGraph
 from paperbridge.models.base_search import BASESearchResponse, BASEWork
 from paperbridge.models.citation_workflow import (
     CitationVerificationResult,
@@ -72,6 +73,8 @@ __all__ = [
     # arxiv
     "ArXivPreprint",
     "ArXivSearchResult",
+    # citation_graph
+    "CitationGraph",
     # base_search
     "BASEWork",
     "BASESearchResponse",

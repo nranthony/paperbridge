@@ -8,12 +8,34 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
+from paperbridge.models.article import ArticleRecord
 from paperbridge.models.citation_workflow import CitationVerificationResult, WorkflowInput
 from paperbridge.models.citation_workflow import SupportType  # noqa: F401
 
 
 class CitationExporter:
     """Export citation workflow results to multiple formats."""
+
+    @staticmethod
+    def export_article(record: ArticleRecord, filepath: str) -> str:
+        """Serialise an ArticleRecord to JSON with a metadata header. Returns absolute path."""
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            "export_info": {
+                "timestamp": datetime.now().isoformat(),
+                "paperbridge_version": "0.1.0",
+                "record_type": "ArticleRecord",
+            },
+            "record": record.model_dump(),
+        }
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"ArticleRecord exported to: {filepath}")
+        return str(filepath.absolute())
 
     @staticmethod
     def export_markdown(summary: str, filepath: str) -> str:

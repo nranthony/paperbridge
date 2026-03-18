@@ -11,9 +11,13 @@ Consolidates publication-related code from `mygentic` (my-agentic-tools) and `we
 ## Development Commands
 
 ```bash
-# Install (dev mode with all extras)
-pip install -e ".[dev]"        # test/lint tools only
-pip install -e ".[all,dev]"    # includes optional PDF/bibtex deps
+# Install via uv (preferred)
+uv sync --group dev                  # test + lint tools
+uv sync --group notebook             # ipykernel + ipywidgets
+uv sync --group all-dev              # all dev groups combined
+
+# Install via pip (alternative)
+pip install -e ".[all]"              # core + optional PDF/bibtex deps
 
 # Tests
 pytest tests/

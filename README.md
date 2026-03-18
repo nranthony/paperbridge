@@ -74,18 +74,26 @@ with CitationAggregator() as agg:
 
 ## Configuration
 
-Set environment variables (or use a `.env` file):
+Copy `.env.example` to `.env` and fill in your values:
+
+```bash
+cp .env.example .env
+```
 
 | Variable | Purpose |
 |---|---|
 | `NCBI_API_KEY` | PubMed rate limit: 10 req/s (vs 3 without key) |
 | `MY_EMAIL` / `UNPAYWALL_EMAIL` | Polite pool for CrossRef / Unpaywall |
 | `REQUEST_TIMEOUT` | Default HTTP timeout in seconds (default: 30) |
+| `MAX_RETRIES` | HTTP retry attempts (default: 3) |
 
 ## Development
 
 ```bash
-uv sync --group dev
+uv sync --group dev                  # test + lint tools
+uv sync --group notebook             # ipykernel + ipywidgets
+uv sync --group dev --group notebook # both groups
+uv sync --group all-dev              # shorthand for all dev groups
 pytest tests/
 ruff check src/
 mypy src/

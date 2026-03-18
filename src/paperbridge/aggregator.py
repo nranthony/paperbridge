@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from loguru import logger
 
+from paperbridge._config import PaperBridgeSettings
 from paperbridge.clients._base import BaseAPIClient
 from paperbridge.clients.crossref import CrossRefClient
+from paperbridge.clients.downloader import PublicationDownloaderClient
 from paperbridge.clients.europepmc import EuropePMCClient
 from paperbridge.clients.openalex import OpenAlexClient
 from paperbridge.clients.pubmed import PubMedClient
 from paperbridge.models.article import ArticleRecord
+from paperbridge.models.citation_graph import CitationGraph
+from paperbridge.models.download import DownloadResult
 
 
 class CitationAggregator:
@@ -79,6 +83,70 @@ class CitationAggregator:
                 logger.error(f"{client.source_name} full_text failed for {doi}: {e}")
 
         return record
+
+    def fetch_citation_graph(
+        self,
+        doi: str,
+        cited_by_limit: int = 50,
+        references_limit: int = 50,
+    ) -> CitationGraph | None:
+        """Return a bi-directional citation graph for *doi* via OpenAlex.
+
+        Returns None if the DOI is not found in OpenAlex. Does not raise.
+        """
+        openalex = next(
+            (c for c in self.clients if isinstance(c, OpenAlexClient)), None
+        )
+        if openalex is None:
+            logger.warning("No OpenAlexClient in client list — cannot build citation graph")
+            return None
+
+        try:
+            source_work = openalex.get_work_by_doi(doi)
+        except Exception as e:
+            logger.error(f"OpenAlex lookup failed for {doi}: {e}")
+            return None
+
+        if source_work is None:
+            logger.info(f"DOI not found in OpenAlex: {doi}")
+            return None
+
+        work_id = source_work.id
+
+        try:
+            cited_by = openalex.get_citations(work_id, per_page=cited_by_limit)
+        except Exception as e:
+            logger.error(f"OpenAlex get_citations failed for {work_id}: {e}")
+            cited_by = []
+
+        try:
+            references = openalex.get_references(work_id, per_page=references_limit)
+        except Exception as e:
+            logger.error(f"OpenAlex get_references failed for {work_id}: {e}")
+            references = []
+
+        return CitationGraph(
+            source_doi=doi,
+            source_work=source_work,
+            cited_by=cited_by,
+            references=references,
+            cited_by_count=source_work.cited_by_count,
+            reference_count=len(source_work.referenced_works),
+        )
+
+    def download_article(
+        self,
+        doi: str,
+        output_dir: str = ".",
+    ) -> DownloadResult:
+        """Download the full text for *doi* using PublicationDownloaderClient."""
+        settings = PaperBridgeSettings()
+        email = settings.unpaywall_email
+        if not email:
+            logger.warning("No email configured (MY_EMAIL/UNPAYWALL_EMAIL) — Unpaywall path unavailable")
+            email = "unknown@example.com"
+        downloader = PublicationDownloaderClient(email=email)
+        return downloader.download_by_identifiers(doi=doi, output_dir=output_dir)
 
     def close(self) -> None:
         if self._owns_clients:

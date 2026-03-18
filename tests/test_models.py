@@ -2,6 +2,7 @@
 
 import pytest
 
+from tests.conftest import SAMPLE_DOI
 from paperbridge.models.article import (
     ArticleAbstract,
     ArticleKeywords,
@@ -96,6 +97,76 @@ class TestArticleRecord:
         assert len(record.keywords) == 1
         assert len(record.abstracts) == 1
         assert len(record.metadata) == 1
+
+
+class TestArticleRecordMergedMetadata:
+    def test_returns_none_for_empty_record(self):
+        record = ArticleRecord(doi="10.1/test")
+        assert record.merged_metadata is None
+
+    def test_title_first_non_none(self):
+        m1 = ArticleMetadata(source="a", title=None)
+        m2 = ArticleMetadata(source="b", title="Best Title")
+        record = ArticleRecord(doi="10.1/test", metadata=[m1, m2])
+        assert record.merged_metadata.title == "Best Title"
+
+    def test_authors_longest_list(self):
+        m1 = ArticleMetadata(source="a", authors=["Alice"])
+        m2 = ArticleMetadata(source="b", authors=["Alice", "Bob", "Carol"])
+        record = ArticleRecord(doi="10.1/test", metadata=[m1, m2])
+        assert record.merged_metadata.authors == ["Alice", "Bob", "Carol"]
+
+    def test_citation_count_max(self):
+        m1 = ArticleMetadata(source="a", citation_count=100)
+        m2 = ArticleMetadata(source="b", citation_count=500)
+        m3 = ArticleMetadata(source="c")
+        record = ArticleRecord(doi="10.1/test", metadata=[m1, m2, m3])
+        assert record.merged_metadata.citation_count == 500
+
+    def test_pmid_first_non_none(self):
+        m1 = ArticleMetadata(source="a", pmid=None)
+        m2 = ArticleMetadata(source="b", pmid="12345678")
+        record = ArticleRecord(doi="10.1/test", metadata=[m1, m2])
+        assert record.merged_metadata.pmid == "12345678"
+
+    def test_source_is_merged(self):
+        m = ArticleMetadata(source="crossref", title="T")
+        record = ArticleRecord(doi="10.1/test", metadata=[m])
+        assert record.merged_metadata.source == "merged"
+
+
+class TestArticleRecordToBibtex:
+    def test_returns_none_for_empty_metadata(self):
+        record = ArticleRecord(doi="10.1/test")
+        assert record.to_bibtex() is None
+
+    def test_basic_bibtex_output(self, sample_metadata):
+        record = ArticleRecord(doi=sample_metadata.doi, metadata=[sample_metadata])
+        bib = record.to_bibtex()
+        assert bib is not None
+        assert "@article{" in bib
+        assert "Programmable base editing" in bib
+        assert "Nature" in bib
+        assert "2021" in bib
+        assert SAMPLE_DOI in bib
+
+    def test_cite_key_format(self):
+        m = ArticleMetadata(source="a", authors=["Jane Doe"], year=2020, title="T")
+        record = ArticleRecord(doi="10.1/t", metadata=[m])
+        bib = record.to_bibtex()
+        assert "@article{Doe2020," in bib
+
+    def test_unknown_author_fallback(self):
+        m = ArticleMetadata(source="a", title="T", year=2020)
+        record = ArticleRecord(doi="10.1/t", metadata=[m])
+        bib = record.to_bibtex()
+        assert "@article{Unknown2020," in bib
+
+    def test_pmid_in_note(self):
+        m = ArticleMetadata(source="a", authors=["A B"], year=2020, pmid="99999")
+        record = ArticleRecord(doi="10.1/t", metadata=[m])
+        bib = record.to_bibtex()
+        assert "PMID: 99999" in bib
 
 
 class TestKeywordScoreList:
