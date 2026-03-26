@@ -10,6 +10,7 @@ from paperbridge.clients.europepmc import EuropePMCClient
 from paperbridge.clients.openalex import OpenAlexClient
 from paperbridge.clients.pubmed import PubMedClient
 from paperbridge.clients.unpaywall import UnpaywallClient
+from paperbridge.clients.zotero import ZoteroClient
 
 __all__ = [
     "ArXivFamilyClient",
@@ -22,4 +23,5 @@ __all__ = [
     "PubMedClient",
     "PublicationDownloaderClient",
     "UnpaywallClient",
+    "ZoteroClient",
 ]

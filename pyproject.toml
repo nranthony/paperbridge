@@ -21,7 +21,8 @@ dependencies = [
 [project.optional-dependencies]
 docs = ["pdfplumber>=0.10", "pymupdf>=1.23", "pymupdf4llm>=0.0.10", "trafilatura>=1.6"]
 bibtex = ["bibtexparser>=1.4"]
-all = ["paperbridge[docs,bibtex]"]
+zotero = ["pyzotero>=1.5"]
+all = ["paperbridge[docs,bibtex,zotero]"]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "pytest-mock", "ruff", "mypy"]

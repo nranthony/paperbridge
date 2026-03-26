@@ -59,6 +59,16 @@ from paperbridge.models.pubmed import (
     SortOrder,
 )
 from paperbridge.models.workflow_config import WorkflowConfig, WorkflowModelConfig, WorkflowOptimizationConfig
+from paperbridge.models.zotero import (
+    ZoteroCollection,
+    ZoteroCreator,
+    ZoteroItem,
+    ZoteroItemData,
+    ZoteroItemType,
+    ZoteroSearchResult,
+    ZoteroSyncResult,
+    ZoteroTag,
+)
 
 __all__ = [
     # article
@@ -137,4 +147,13 @@ __all__ = [
     "WorkflowModelConfig",
     "WorkflowOptimizationConfig",
     "WorkflowConfig",
+    # zotero
+    "ZoteroCollection",
+    "ZoteroCreator",
+    "ZoteroItem",
+    "ZoteroItemData",
+    "ZoteroItemType",
+    "ZoteroSearchResult",
+    "ZoteroSyncResult",
+    "ZoteroTag",
 ]

@@ -1,0 +1,567 @@
+"""Zotero Web API v3 client.
+
+Wraps `pyzotero <https://github.com/urschrei/pyzotero>`_ to provide
+a typed, Pydantic-model interface consistent with other paperbridge clients.
+
+Requires the ``[zotero]`` optional dependency group::
+
+    pip install paperbridge[zotero]
+"""
+
+import re
+from typing import Any, Literal, Optional
+
+from paperbridge._logging import get_logger
+from paperbridge.models.article import ArticleMetadata, ArticleRecord
+from paperbridge.models.zotero import (
+    ZoteroCollection,
+    ZoteroCreator,
+    ZoteroItem,
+    ZoteroItemData,
+    ZoteroSearchResult,
+    ZoteroSyncResult,
+    ZoteroTag,
+)
+
+try:
+    from pyzotero import zotero
+except ImportError:
+    zotero = None  # type: ignore[assignment]
+
+logger = get_logger(__name__)
+
+
+class ZoteroClient:
+    """Client for the Zotero Web API v3.
+
+    Supports reading from and writing to user or group libraries.
+
+    Parameters
+    ----------
+    api_key : str
+        Zotero API key (create at https://www.zotero.org/settings/keys).
+    library_id : str
+        Numeric user or group library ID.
+    library_type : ``"user"`` or ``"group"``
+        Which library namespace to use.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        library_id: str,
+        library_type: Literal["user", "group"] = "user",
+    ) -> None:
+        if zotero is None:
+            raise ImportError(
+                "pyzotero is required for ZoteroClient. "
+                "Install it with: pip install paperbridge[zotero]"
+            )
+        if not api_key:
+            raise ValueError("Zotero API key is required")
+        if not library_id:
+            raise ValueError("Zotero library ID is required")
+        if library_type not in ("user", "group"):
+            raise ValueError(f"library_type must be 'user' or 'group', got '{library_type}'")
+
+        self.api_key = api_key
+        self.library_id = library_id
+        self.library_type = library_type
+        self._zot = zotero.Zotero(library_id, library_type, api_key)
+
+    # ------------------------------------------------------------------
+    # Context manager
+    # ------------------------------------------------------------------
+
+    def __enter__(self) -> "ZoteroClient":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """No persistent resources to release, but keeps API consistent."""
+
+    def __repr__(self) -> str:
+        return f"ZoteroClient(library_id={self.library_id!r}, library_type={self.library_type!r})"
+
+    # ------------------------------------------------------------------
+    # READ: Items
+    # ------------------------------------------------------------------
+
+    def get_items(
+        self,
+        limit: int = 25,
+        start: int = 0,
+        sort: str = "dateModified",
+        direction: str = "desc",
+        item_type: Optional[str] = None,
+        tag: Optional[str | list[str]] = None,
+        q: Optional[str] = None,
+        since: Optional[int] = None,
+    ) -> ZoteroSearchResult:
+        """Fetch items from the library with optional filters.
+
+        Parameters
+        ----------
+        limit : int
+            Max items to return (Zotero caps at 100).
+        start : int
+            Pagination offset.
+        sort : str
+            Field to sort by (``dateModified``, ``dateAdded``, ``title``, etc.).
+        direction : str
+            ``"asc"`` or ``"desc"``.
+        item_type : str, optional
+            Filter by item type (e.g. ``"journalArticle"``).
+        tag : str or list[str], optional
+            Filter by tag(s).
+        q : str, optional
+            Quick-search query string.
+        since : int, optional
+            Return only items modified since this library version.
+        """
+        kwargs: dict[str, Any] = {
+            "limit": limit,
+            "start": start,
+            "sort": sort,
+            "direction": direction,
+        }
+        if item_type:
+            kwargs["itemType"] = item_type
+        if tag:
+            kwargs["tag"] = tag if isinstance(tag, str) else " || ".join(tag)
+        if q:
+            kwargs["q"] = q
+        if since is not None:
+            kwargs["since"] = since
+
+        raw_items = self._zot.items(**kwargs)
+        items = [self._dict_to_item(r) for r in raw_items]
+        total = int(self._zot.request.headers.get("Total-Results", len(items)))
+
+        return ZoteroSearchResult(
+            items=items,
+            total_results=total,
+            start=start,
+            limit=limit,
+            query=q,
+        )
+
+    def get_item(self, item_key: str) -> ZoteroItem:
+        """Fetch a single item by its key."""
+        raw = self._zot.item(item_key)
+        return self._dict_to_item(raw)
+
+    def get_all_items(
+        self,
+        item_type: Optional[str] = None,
+        tag: Optional[str | list[str]] = None,
+        q: Optional[str] = None,
+    ) -> list[ZoteroItem]:
+        """Auto-paginate through all items matching the filters.
+
+        Returns every matching item in the library regardless of size.
+        Use with caution on large libraries.
+
+        Parameters
+        ----------
+        item_type : str, optional
+            Filter by item type (e.g. ``"journalArticle"``).
+        tag : str or list[str], optional
+            Filter by tag(s).
+        q : str, optional
+            Quick-search query string.
+        """
+        kwargs: dict[str, Any] = {}
+        if item_type:
+            kwargs["itemType"] = item_type
+        if tag:
+            kwargs["tag"] = tag if isinstance(tag, str) else " || ".join(tag)
+        if q:
+            kwargs["q"] = q
+
+        raw_items = self._zot.everything(self._zot.items(**kwargs))
+        return [self._dict_to_item(r) for r in raw_items]
+
+    def search(self, query: str, limit: int = 25, start: int = 0) -> ZoteroSearchResult:
+        """Quick-search across the library (titles, creators, years, etc.)."""
+        return self.get_items(q=query, limit=limit, start=start)
+
+    def get_item_bibtex(self, item_key: str) -> str:
+        """Fetch a single item as a BibTeX string."""
+        return self._zot.item(item_key, format="bibtex")
+
+    def get_items_in_collection(
+        self,
+        collection_key: str,
+        limit: int = 25,
+        start: int = 0,
+    ) -> ZoteroSearchResult:
+        """Fetch items belonging to a specific collection."""
+        raw_items = self._zot.collection_items(collection_key, limit=limit, start=start)
+        items = [self._dict_to_item(r) for r in raw_items]
+        total = int(self._zot.request.headers.get("Total-Results", len(items)))
+        return ZoteroSearchResult(
+            items=items,
+            total_results=total,
+            start=start,
+            limit=limit,
+        )
+
+    def find_item_by_doi(self, doi: str) -> Optional[ZoteroItem]:
+        """Search library for an item with the given DOI.
+
+        Uses Zotero quick-search then filters client-side for an exact match.
+        """
+        result = self.get_items(q=doi, limit=10)
+        for item in result.items:
+            if item.data.doi and item.data.doi.lower() == doi.lower():
+                return item
+        return None
+
+    # ------------------------------------------------------------------
+    # READ: Collections
+    # ------------------------------------------------------------------
+
+    def get_collections(self, limit: int = 100, start: int = 0) -> list[ZoteroCollection]:
+        """Fetch top-level collections."""
+        raw = self._zot.collections(limit=limit, start=start)
+        return [self._dict_to_collection(c) for c in raw]
+
+    def get_collection(self, collection_key: str) -> ZoteroCollection:
+        """Fetch a single collection by key."""
+        raw = self._zot.collection(collection_key)
+        return self._dict_to_collection(raw)
+
+    def get_subcollections(self, collection_key: str) -> list[ZoteroCollection]:
+        """Fetch child collections of a given collection."""
+        raw = self._zot.collections_sub(collection_key)
+        return [self._dict_to_collection(c) for c in raw]
+
+    # ------------------------------------------------------------------
+    # READ: Tags
+    # ------------------------------------------------------------------
+
+    def get_tags(self, limit: int = 100, start: int = 0) -> list[str]:
+        """Fetch all tags in the library."""
+        raw = self._zot.tags(limit=limit, start=start)
+        return [t["tag"] for t in raw]
+
+    def get_item_tags(self, item_key: str) -> list[str]:
+        """Get tags for a specific item."""
+        item = self.get_item(item_key)
+        return [t.tag for t in item.data.tags]
+
+    # ------------------------------------------------------------------
+    # WRITE: Items
+    # ------------------------------------------------------------------
+
+    def create_item(self, item_data: ZoteroItemData) -> ZoteroItem:
+        """Create a single item in the library.
+
+        Returns the created item with its server-assigned key.
+        """
+        template = self._zot.item_template(item_data.item_type)
+        payload = self._merge_item_data_into_template(template, item_data)
+        resp = self._zot.create_items([payload])
+        created = resp.get("successful", {})
+        if "0" in created:
+            return self._dict_to_item(created["0"])
+        failed = resp.get("failed", {})
+        raise RuntimeError(f"Failed to create Zotero item: {failed}")
+
+    def create_items(self, items: list[ZoteroItemData]) -> ZoteroSyncResult:
+        """Batch-create multiple items in the library.
+
+        Automatically chunks into batches of 50 per Zotero API limits.
+        Returns a ``ZoteroSyncResult`` with created keys and any failures.
+        """
+        result = ZoteroSyncResult(total_attempted=len(items))
+
+        for chunk_start in range(0, len(items), 50):
+            chunk = items[chunk_start : chunk_start + 50]
+            payloads = []
+            for item_data in chunk:
+                template = self._zot.item_template(item_data.item_type)
+                payloads.append(self._merge_item_data_into_template(template, item_data))
+
+            resp = self._zot.create_items(payloads)
+            for _idx, item_dict in resp.get("successful", {}).items():
+                result.created_keys.append(item_dict["key"])
+            for idx, err in resp.get("failed", {}).items():
+                result.failed.append({"index": int(idx) + chunk_start, "error": err})
+
+        return result
+
+    def update_item(self, item_key: str, item_data: ZoteroItemData) -> ZoteroItem:
+        """Update an existing item.
+
+        Fetches the current version from the server to ensure
+        optimistic-locking headers are correct.
+        """
+        existing = self._zot.item(item_key)
+        merged = self._merge_item_data_into_template(existing["data"], item_data)
+        existing["data"] = merged
+        self._zot.update_item(existing)
+        return self.get_item(item_key)
+
+    def delete_item(self, item_key: str) -> bool:
+        """Delete an item from the library by its key."""
+        item = self._zot.item(item_key)
+        self._zot.delete_item(item)
+        return True
+
+    def add_tags_to_item(self, item_key: str, tags: list[str]) -> ZoteroItem:
+        """Append tags to an existing item (merge, don't replace)."""
+        raw = self._zot.item(item_key)
+        existing_tags = {t["tag"] for t in raw["data"].get("tags", [])}
+        for tag in tags:
+            if tag not in existing_tags:
+                raw["data"]["tags"].append({"tag": tag, "type": 0})
+        self._zot.update_item(raw)
+        return self.get_item(item_key)
+
+    def add_item_to_collection(self, item_key: str, collection_key: str) -> ZoteroItem:
+        """Add an existing item to a collection."""
+        raw = self._zot.item(item_key)
+        collections = raw["data"].get("collections", [])
+        if collection_key not in collections:
+            collections.append(collection_key)
+            raw["data"]["collections"] = collections
+            self._zot.update_item(raw)
+        return self.get_item(item_key)
+
+    # ------------------------------------------------------------------
+    # WRITE: Collections
+    # ------------------------------------------------------------------
+
+    def create_collection(
+        self,
+        name: str,
+        parent_key: Optional[str] = None,
+    ) -> ZoteroCollection:
+        """Create a new collection, optionally nested under ``parent_key``."""
+        payload: dict[str, Any] = {"name": name}
+        if parent_key:
+            payload["parentCollection"] = parent_key
+        resp = self._zot.create_collections([payload])
+        created = resp.get("successful", {})
+        if "0" in created:
+            return self._dict_to_collection(created["0"])
+        failed = resp.get("failed", {})
+        raise RuntimeError(f"Failed to create collection: {failed}")
+
+    def delete_collection(self, collection_key: str) -> bool:
+        """Delete a collection by key. Items in the collection are not deleted."""
+        col = self._zot.collection(collection_key)
+        self._zot.delete_collection(col)
+        return True
+
+    # ------------------------------------------------------------------
+    # CONVERSION: Zotero <-> paperbridge models
+    # ------------------------------------------------------------------
+
+    def item_to_article_metadata(self, item: ZoteroItem) -> ArticleMetadata:
+        """Convert a ZoteroItem to a paperbridge ``ArticleMetadata``.
+
+        Extracts authors (creator_type ``"author"`` only), parses the year
+        from the date string, and pulls PMID from the Extra field if present.
+        """
+        data = item.data
+        authors = [c.display_name for c in data.creators if c.creator_type == "author"]
+
+        year = None
+        if data.date:
+            match = re.search(r"\b(19|20)\d{2}\b", data.date)
+            if match:
+                year = int(match.group())
+
+        pmid = self._extract_pmid_from_extra(data.extra)
+
+        return ArticleMetadata(
+            source="zotero",
+            title=data.title,
+            authors=authors,
+            year=year,
+            journal=data.publication_title,
+            doi=data.doi,
+            pmid=pmid,
+        )
+
+    def article_metadata_to_item_data(
+        self,
+        metadata: ArticleMetadata,
+        collection_keys: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
+    ) -> ZoteroItemData:
+        """Convert a paperbridge ``ArticleMetadata`` to ``ZoteroItemData``.
+
+        Author name strings are split into first/last name. PMID is stored
+        in the Zotero Extra field. The resulting item type is ``journalArticle``.
+        """
+        creators = []
+        for author in metadata.authors:
+            parts = author.split()
+            if len(parts) > 1:
+                creators.append(
+                    ZoteroCreator(creator_type="author", first_name=" ".join(parts[:-1]), last_name=parts[-1])
+                )
+            else:
+                creators.append(ZoteroCreator(creator_type="author", last_name=author))
+
+        ztags = [ZoteroTag(tag=t) for t in (tags or [])]
+
+        extra_parts = []
+        if metadata.pmid:
+            extra_parts.append(f"PMID: {metadata.pmid}")
+
+        return ZoteroItemData(
+            item_type="journalArticle",
+            title=metadata.title,
+            creators=creators,
+            date=str(metadata.year) if metadata.year else None,
+            doi=metadata.doi,
+            publication_title=metadata.journal,
+            tags=ztags,
+            collections=collection_keys or [],
+            extra="\n".join(extra_parts) if extra_parts else None,
+        )
+
+    def article_record_to_item_data(
+        self,
+        record: ArticleRecord,
+        collection_keys: Optional[list[str]] = None,
+        tags: Optional[list[str]] = None,
+    ) -> ZoteroItemData:
+        """Convert an ArticleRecord to ZoteroItemData.
+
+        Uses ``merged_metadata`` for fields, adds abstract and keywords.
+        """
+        merged = record.merged_metadata
+        if merged is None:
+            merged = ArticleMetadata(source="paperbridge", doi=record.doi)
+
+        all_tags = list(tags or [])
+        all_tags.extend(record.combined_keywords)
+        # deduplicate while preserving order
+        seen: set[str] = set()
+        unique_tags: list[str] = []
+        for t in all_tags:
+            if t not in seen:
+                seen.add(t)
+                unique_tags.append(t)
+
+        item_data = self.article_metadata_to_item_data(
+            merged,
+            collection_keys=collection_keys,
+            tags=unique_tags,
+        )
+
+        if record.abstracts:
+            item_data.abstract_note = record.abstracts[0].text
+
+        return item_data
+
+    def sync_article_records(
+        self,
+        records: list[ArticleRecord],
+        collection_key: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        skip_existing: bool = True,
+    ) -> ZoteroSyncResult:
+        """Batch-sync ArticleRecords into Zotero.
+
+        Parameters
+        ----------
+        records : list[ArticleRecord]
+            Records to sync.
+        collection_key : str, optional
+            Add created items to this collection.
+        tags : list[str], optional
+            Extra tags to apply to all items.
+        skip_existing : bool
+            If True, skip records whose DOI already exists in the library.
+        """
+        collection_keys = [collection_key] if collection_key else None
+        items_to_create: list[ZoteroItemData] = []
+
+        for record in records:
+            if skip_existing and self.find_item_by_doi(record.doi):
+                logger.info(f"Skipping existing DOI: {record.doi}")
+                continue
+            items_to_create.append(
+                self.article_record_to_item_data(record, collection_keys=collection_keys, tags=tags)
+            )
+
+        if not items_to_create:
+            logger.info("No new items to sync")
+            return ZoteroSyncResult(total_attempted=len(records))
+
+        return self.create_items(items_to_create)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _dict_to_item(self, raw: dict[str, Any]) -> ZoteroItem:
+        """Convert a pyzotero item dict to a ZoteroItem model."""
+        data_dict = raw.get("data", {})
+        data = ZoteroItemData.model_validate(data_dict)
+        return ZoteroItem(
+            key=raw["key"],
+            version=raw["version"],
+            library=raw.get("library", {}),
+            data=data,
+            meta=raw.get("meta", {}),
+            links=raw.get("links", {}),
+        )
+
+    def _dict_to_collection(self, raw: dict[str, Any]) -> ZoteroCollection:
+        """Convert a pyzotero collection dict to a ZoteroCollection model."""
+        data = raw.get("data", {})
+        parent = data.get("parentCollection")
+        # Zotero uses False (not None) when there's no parent collection
+        if parent is False:
+            parent = None
+        return ZoteroCollection(
+            key=raw.get("key", data.get("key", "")),
+            version=raw.get("version", data.get("version", 0)),
+            name=data.get("name", ""),
+            parent_collection=parent,
+            data=data,
+        )
+
+    def _merge_item_data_into_template(
+        self,
+        template: dict[str, Any],
+        item_data: ZoteroItemData,
+    ) -> dict[str, Any]:
+        """Merge ZoteroItemData fields into a pyzotero item template/dict.
+
+        Only overwrites template keys with non-None values from item_data.
+        """
+        dumped = item_data.model_dump(by_alias=True, exclude_none=True)
+        # Remove internal fields that shouldn't be sent to the API
+        dumped.pop("key", None)
+        dumped.pop("version", None)
+
+        for key, value in dumped.items():
+            if key == "creators":
+                template["creators"] = [
+                    c.model_dump(by_alias=True, exclude_none=True) for c in item_data.creators
+                ]
+            elif key == "tags":
+                template["tags"] = [t.model_dump() for t in item_data.tags]
+            else:
+                template[key] = value
+
+        return template
+
+    @staticmethod
+    def _extract_pmid_from_extra(extra: Optional[str]) -> Optional[str]:
+        """Extract PMID from Zotero's 'Extra' field if present."""
+        if not extra:
+            return None
+        match = re.search(r"PMID:\s*(\d+)", extra)
+        return match.group(1) if match else None

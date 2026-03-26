@@ -14,6 +14,9 @@ pip install "paperbridge[docs]"
 # with BibTeX export
 pip install "paperbridge[bibtex]"
 
+# with Zotero library sync
+pip install "paperbridge[zotero]"
+
 # everything
 pip install "paperbridge[all]"
 ```
@@ -34,6 +37,7 @@ Requires Python 3.12+.
 | `DOIResolverClient` | DOI → URL resolution |
 | `PublicationDownloaderClient` | PDF download orchestration |
 | `DocumentParserClient` | PDF → structured text extraction |
+| `ZoteroClient` | Read/write Zotero user and group libraries |
 
 ## Usage
 
@@ -62,6 +66,22 @@ with PubMedClient(api_key="...") as pm:
     results = pm.search_and_fetch("CRISPR base editing", retmax=20)
 ```
 
+### Zotero library sync
+
+```python
+from paperbridge.clients import ZoteroClient
+
+# Read from a group library
+with ZoteroClient(api_key="...", library_id="12345", library_type="group") as zot:
+    results = zot.get_items(limit=10)
+    for item in results.items:
+        print(item.data.title, item.data.doi)
+
+# Sync paperbridge results into Zotero
+with ZoteroClient(api_key="...", library_id="12345") as zot:
+    zot.sync_article_records(records, collection_key="ABC123", tags=["imported"])
+```
+
 ### Keyword aggregation
 
 ```python
@@ -86,6 +106,9 @@ cp .env.example .env
 | `MY_EMAIL` / `UNPAYWALL_EMAIL` | Polite pool for CrossRef / Unpaywall |
 | `REQUEST_TIMEOUT` | Default HTTP timeout in seconds (default: 30) |
 | `MAX_RETRIES` | HTTP retry attempts (default: 3) |
+| `ZOTERO_API_KEY` | Zotero API key ([create here](https://www.zotero.org/settings/keys)) |
+| `ZOTERO_LIBRARY_ID` | Numeric user or group library ID |
+| `ZOTERO_LIBRARY_TYPE` | `user` (default) or `group` |
 
 ## Development
 

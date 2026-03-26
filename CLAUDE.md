@@ -34,15 +34,16 @@ Two client hierarchies exist side-by-side:
 
 1. **`BaseAPIClient` subclasses** (`clients/_base.py`) — DOI-oriented clients that implement any subset of `fetch_keywords`, `fetch_abstract`, `fetch_metadata`, `fetch_full_text`. Currently: `CrossRefClient`, `EuropePMCClient`, `OpenAlexClient`, `PubMedClient`.
 
-2. **Standalone search clients** — not DOI-driven; operate independently. Currently: `ArXivFamilyClient`, `BASESearchClient`, `DOIResolverClient`, `UnpaywallClient`, `PublicationDownloaderClient`, `DocumentParserClient`.
+2. **Standalone search clients** — not DOI-driven; operate independently. Currently: `ArXivFamilyClient`, `BASESearchClient`, `DOIResolverClient`, `UnpaywallClient`, `PublicationDownloaderClient`, `DocumentParserClient`, `ZoteroClient`.
 
 `CitationAggregator` (`aggregator.py`) owns a list of `BaseAPIClient` instances and fans out DOI lookups across all of them, merging results into an `ArticleRecord`.
 
-**Configuration** (`_config.py`): `PaperBridgeSettings` loads from env vars or `.env`. Relevant vars: `NCBI_API_KEY`, `MY_EMAIL` / `UNPAYWALL_EMAIL`, `REQUEST_TIMEOUT`, `MAX_RETRIES`. No global singleton — instantiate per client.
+**Configuration** (`_config.py`): `PaperBridgeSettings` loads from env vars or `.env`. Relevant vars: `NCBI_API_KEY`, `MY_EMAIL` / `UNPAYWALL_EMAIL`, `REQUEST_TIMEOUT`, `MAX_RETRIES`, `ZOTERO_API_KEY`, `ZOTERO_LIBRARY_ID`, `ZOTERO_LIBRARY_TYPE`. No global singleton — instantiate per client.
 
 **Optional dependency groups** (guard all imports with `try/except`):
 - `[docs]` — `pdfplumber`, `pymupdf`, `pymupdf4llm`, `trafilatura`
 - `[bibtex]` — `bibtexparser`
+- `[zotero]` — `pyzotero`
 
 ## Key Conventions
 
