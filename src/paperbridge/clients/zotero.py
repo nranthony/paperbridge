@@ -265,8 +265,7 @@ class ZoteroClient:
 
     def get_tags(self, limit: int = 100, start: int = 0) -> list[str]:
         """Fetch all tags in the library."""
-        raw = self._zot.tags(limit=limit, start=start)
-        return [t["tag"] for t in raw]
+        return list(self._zot.tags(limit=limit, start=start))
 
     def get_item_tags(self, item_key: str) -> list[str]:
         """Get tags for a specific item."""

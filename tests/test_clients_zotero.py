@@ -154,7 +154,7 @@ class TestZoteroClientRead:
 
     def test_get_tags(self):
         client = _make_client()
-        client._zot.tags.return_value = [{"tag": "gene editing"}, {"tag": "CRISPR"}]
+        client._zot.tags.return_value = ["gene editing", "CRISPR"]
 
         tags = client.get_tags()
 
