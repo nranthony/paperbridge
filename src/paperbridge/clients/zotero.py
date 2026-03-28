@@ -9,7 +9,7 @@ Requires the ``[zotero]`` optional dependency group::
 """
 
 import re
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from paperbridge._logging import get_logger
 from paperbridge.models.article import ArticleMetadata, ArticleRecord
@@ -35,22 +35,34 @@ class ZoteroClient:
     """Client for the Zotero Web API v3.
 
     Supports reading from and writing to user or group libraries.
+    Provide either ``user_id`` for a personal library or ``group_id``
+    for a group library. If both are given, ``group_id`` takes precedence.
 
     Parameters
     ----------
     api_key : str
         Zotero API key (create at https://www.zotero.org/settings/keys).
-    library_id : str
-        Numeric user or group library ID.
-    library_type : ``"user"`` or ``"group"``
-        Which library namespace to use.
+    user_id : str, optional
+        Numeric user ID (shown at https://www.zotero.org/settings/keys).
+        Connects to the personal library.
+    group_id : str, optional
+        Numeric group ID (from the group URL on zotero.org).
+        Connects to the group library. Takes precedence over ``user_id``.
+
+    Examples
+    --------
+    >>> with ZoteroClient(api_key="...", group_id="12345") as zot:
+    ...     items = zot.get_items(limit=5)
+
+    >>> with ZoteroClient(api_key="...", user_id="67890") as zot:
+    ...     items = zot.get_items(limit=5)
     """
 
     def __init__(
         self,
         api_key: str,
-        library_id: str,
-        library_type: Literal["user", "group"] = "user",
+        user_id: Optional[str] = None,
+        group_id: Optional[str] = None,
     ) -> None:
         if zotero is None:
             raise ImportError(
@@ -59,15 +71,19 @@ class ZoteroClient:
             )
         if not api_key:
             raise ValueError("Zotero API key is required")
-        if not library_id:
-            raise ValueError("Zotero library ID is required")
-        if library_type not in ("user", "group"):
-            raise ValueError(f"library_type must be 'user' or 'group', got '{library_type}'")
+        if not user_id and not group_id:
+            raise ValueError("Either user_id or group_id must be provided")
+
+        # group_id takes precedence if both are provided
+        if group_id:
+            self.library_id = group_id
+            self.library_type = "group"
+        else:
+            self.library_id = user_id  # type: ignore[assignment]
+            self.library_type = "user"
 
         self.api_key = api_key
-        self.library_id = library_id
-        self.library_type = library_type
-        self._zot = zotero.Zotero(library_id, library_type, api_key)
+        self._zot = zotero.Zotero(self.library_id, self.library_type, api_key)
 
     # ------------------------------------------------------------------
     # Context manager
@@ -83,7 +99,9 @@ class ZoteroClient:
         """No persistent resources to release, but keeps API consistent."""
 
     def __repr__(self) -> str:
-        return f"ZoteroClient(library_id={self.library_id!r}, library_type={self.library_type!r})"
+        if self.library_type == "group":
+            return f"ZoteroClient(group_id={self.library_id!r})"
+        return f"ZoteroClient(user_id={self.library_id!r})"
 
     # ------------------------------------------------------------------
     # READ: Items
@@ -138,7 +156,8 @@ class ZoteroClient:
 
         raw_items = self._zot.items(**kwargs)
         items = [self._dict_to_item(r) for r in raw_items]
-        total = int(self._zot.request.headers.get("Total-Results", len(items)))
+        headers = getattr(self._zot.request, "headers", {})
+        total = int(headers.get("Total-Results", len(items)))
 
         return ZoteroSearchResult(
             items=items,
@@ -201,7 +220,8 @@ class ZoteroClient:
         """Fetch items belonging to a specific collection."""
         raw_items = self._zot.collection_items(collection_key, limit=limit, start=start)
         items = [self._dict_to_item(r) for r in raw_items]
-        total = int(self._zot.request.headers.get("Total-Results", len(items)))
+        headers = getattr(self._zot.request, "headers", {})
+        total = int(headers.get("Total-Results", len(items)))
         return ZoteroSearchResult(
             items=items,
             total_results=total,
@@ -280,7 +300,7 @@ class ZoteroClient:
         result = ZoteroSyncResult(total_attempted=len(items))
 
         for chunk_start in range(0, len(items), 50):
-            chunk = items[chunk_start : chunk_start + 50]
+            chunk = items[chunk_start: chunk_start + 50]
             payloads = []
             for item_data in chunk:
                 template = self._zot.item_template(item_data.item_type)
@@ -539,9 +559,11 @@ class ZoteroClient:
     ) -> dict[str, Any]:
         """Merge ZoteroItemData fields into a pyzotero item template/dict.
 
-        Only overwrites template keys with non-None values from item_data.
+        Only overwrites template keys with fields explicitly set on item_data.
+        List fields (tags, creators, collections) default to [] and would
+        otherwise clobber existing values — exclude_unset=True prevents that.
         """
-        dumped = item_data.model_dump(by_alias=True, exclude_none=True)
+        dumped = item_data.model_dump(by_alias=True, exclude_unset=True)
         # Remove internal fields that shouldn't be sent to the API
         dumped.pop("key", None)
         dumped.pop("version", None)

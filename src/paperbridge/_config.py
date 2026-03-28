@@ -28,13 +28,13 @@ class PaperBridgeSettings(BaseSettings):
         None,
         validation_alias=AliasChoices("ZOTERO_API_KEY", "zotero_api_key"),
     )
-    zotero_library_id: Optional[str] = Field(
+    zotero_user_id: Optional[str] = Field(
         None,
-        validation_alias=AliasChoices("ZOTERO_LIBRARY_ID", "zotero_library_id"),
+        validation_alias=AliasChoices("ZOTERO_USER_ID", "zotero_user_id"),
     )
-    zotero_library_type: str = Field(
-        "user",
-        validation_alias=AliasChoices("ZOTERO_LIBRARY_TYPE", "zotero_library_type"),
+    zotero_group_id: Optional[str] = Field(
+        None,
+        validation_alias=AliasChoices("ZOTERO_GROUP_ID", "zotero_group_id"),
     )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "case_sensitive": False, "extra": "ignore"}

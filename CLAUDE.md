@@ -38,12 +38,16 @@ Two client hierarchies exist side-by-side:
 
 `CitationAggregator` (`aggregator.py`) owns a list of `BaseAPIClient` instances and fans out DOI lookups across all of them, merging results into an `ArticleRecord`.
 
-**Configuration** (`_config.py`): `PaperBridgeSettings` loads from env vars or `.env`. Relevant vars: `NCBI_API_KEY`, `MY_EMAIL` / `UNPAYWALL_EMAIL`, `REQUEST_TIMEOUT`, `MAX_RETRIES`, `ZOTERO_API_KEY`, `ZOTERO_LIBRARY_ID`, `ZOTERO_LIBRARY_TYPE`. No global singleton — instantiate per client.
+**Configuration** (`_config.py`): `PaperBridgeSettings` loads from env vars or `.env`. Relevant vars: `NCBI_API_KEY`, `MY_EMAIL` / `UNPAYWALL_EMAIL`, `REQUEST_TIMEOUT`, `MAX_RETRIES`, `ZOTERO_API_KEY`, `ZOTERO_USER_ID`, `ZOTERO_GROUP_ID`. No global singleton — instantiate per client.
 
 **Optional dependency groups** (guard all imports with `try/except`):
 - `[docs]` — `pdfplumber`, `pymupdf`, `pymupdf4llm`, `trafilatura`
 - `[bibtex]` — `bibtexparser`
 - `[zotero]` — `pyzotero`
+
+## Agent API Reference
+
+See `AGENTS.md` for a compact, task-oriented reference covering all clients, method signatures, return-type fields, and common code patterns. Read that file when writing code that uses paperbridge.
 
 ## Key Conventions
 

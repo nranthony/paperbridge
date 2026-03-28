@@ -72,13 +72,17 @@ with PubMedClient(api_key="...") as pm:
 from paperbridge.clients import ZoteroClient
 
 # Read from a group library
-with ZoteroClient(api_key="...", library_id="12345", library_type="group") as zot:
+with ZoteroClient(api_key="...", group_id="12345") as zot:
     results = zot.get_items(limit=10)
     for item in results.items:
         print(item.data.title, item.data.doi)
 
+# Read from a personal library
+with ZoteroClient(api_key="...", user_id="67890") as zot:
+    results = zot.search("CRISPR")
+
 # Sync paperbridge results into Zotero
-with ZoteroClient(api_key="...", library_id="12345") as zot:
+with ZoteroClient(api_key="...", group_id="12345") as zot:
     zot.sync_article_records(records, collection_key="ABC123", tags=["imported"])
 ```
 
@@ -107,8 +111,8 @@ cp .env.example .env
 | `REQUEST_TIMEOUT` | Default HTTP timeout in seconds (default: 30) |
 | `MAX_RETRIES` | HTTP retry attempts (default: 3) |
 | `ZOTERO_API_KEY` | Zotero API key ([create here](https://www.zotero.org/settings/keys)) |
-| `ZOTERO_LIBRARY_ID` | Numeric user or group library ID |
-| `ZOTERO_LIBRARY_TYPE` | `user` (default) or `group` |
+| `ZOTERO_USER_ID` | Numeric user ID (for personal library) |
+| `ZOTERO_GROUP_ID` | Numeric group ID (for group library; takes precedence) |
 
 ## Development
 

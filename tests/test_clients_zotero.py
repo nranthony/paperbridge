@@ -69,7 +69,7 @@ def _make_client():
 
         from paperbridge.clients.zotero import ZoteroClient
 
-        client = ZoteroClient(api_key="fake-key", library_id="12345", library_type="user")
+        client = ZoteroClient(api_key="fake-key", user_id="12345")
         client._zot = mock_zot_instance
         return client
 
@@ -279,6 +279,30 @@ class TestZoteroClientWrite:
         call_args = client._zot.update_item.call_args[0][0]
         assert "COL00002" in call_args["data"]["collections"]
 
+    def test_update_item_partial_does_not_clear_tags(self):
+        """update_item with only extra set must not clobber existing tags."""
+        client = _make_client()
+        raw_item = {
+            "key": "ABC12345",
+            "version": 42,
+            "data": {
+                "itemType": "journalArticle",
+                "tags": [{"tag": "keep-me", "type": 0}],
+                "collections": [],
+            },
+        }
+        client._zot.item.side_effect = [raw_item, ZOTERO_ITEM_FIXTURE]
+        client._zot.update_item.return_value = None
+
+        from paperbridge.models.zotero import ZoteroItemData
+
+        client.update_item("ABC12345", ZoteroItemData(extra="a note"))
+
+        call_args = client._zot.update_item.call_args[0][0]
+        # tags must be preserved — not replaced with []
+        assert call_args["data"]["tags"] == [{"tag": "keep-me", "type": 0}]
+        assert call_args["data"]["extra"] == "a note"
+
     def test_delete_item(self):
         client = _make_client()
         client._zot.item.return_value = ZOTERO_ITEM_FIXTURE
@@ -375,33 +399,61 @@ class TestZoteroClientInit:
             from paperbridge.clients.zotero import ZoteroClient
 
             with pytest.raises(ValueError, match="API key"):
-                ZoteroClient(api_key="", library_id="123")
+                ZoteroClient(api_key="", user_id="123")
 
-    def test_missing_library_id(self):
+    def test_missing_both_ids(self):
         with patch("paperbridge.clients.zotero.zotero") as mock_mod:
             mock_mod.Zotero.return_value = MagicMock()
             from paperbridge.clients.zotero import ZoteroClient
 
-            with pytest.raises(ValueError, match="library ID"):
-                ZoteroClient(api_key="key", library_id="")
+            with pytest.raises(ValueError, match="user_id or group_id"):
+                ZoteroClient(api_key="key")
 
-    def test_invalid_library_type(self):
+    def test_user_id_sets_user_type(self):
         with patch("paperbridge.clients.zotero.zotero") as mock_mod:
             mock_mod.Zotero.return_value = MagicMock()
             from paperbridge.clients.zotero import ZoteroClient
 
-            with pytest.raises(ValueError, match="library_type"):
-                ZoteroClient(api_key="key", library_id="123", library_type="invalid")
+            client = ZoteroClient(api_key="key", user_id="111")
+            assert client.library_type == "user"
+            assert client.library_id == "111"
+
+    def test_group_id_sets_group_type(self):
+        with patch("paperbridge.clients.zotero.zotero") as mock_mod:
+            mock_mod.Zotero.return_value = MagicMock()
+            from paperbridge.clients.zotero import ZoteroClient
+
+            client = ZoteroClient(api_key="key", group_id="222")
+            assert client.library_type == "group"
+            assert client.library_id == "222"
+
+    def test_group_id_takes_precedence(self):
+        with patch("paperbridge.clients.zotero.zotero") as mock_mod:
+            mock_mod.Zotero.return_value = MagicMock()
+            from paperbridge.clients.zotero import ZoteroClient
+
+            client = ZoteroClient(api_key="key", user_id="111", group_id="222")
+            assert client.library_type == "group"
+            assert client.library_id == "222"
 
     def test_context_manager(self):
         client = _make_client()
         with client as c:
             assert c is client
 
-    def test_repr(self):
+    def test_repr_user(self):
         client = _make_client()
+        assert "user_id=" in repr(client)
         assert "12345" in repr(client)
-        assert "user" in repr(client)
+
+    def test_repr_group(self):
+        with patch("paperbridge.clients.zotero.zotero") as mock_mod:
+            mock_mod.Zotero.return_value = MagicMock()
+            from paperbridge.clients.zotero import ZoteroClient
+
+            client = ZoteroClient(api_key="key", group_id="999")
+            assert "group_id=" in repr(client)
+            assert "999" in repr(client)
 
 
 class TestZoteroModels:
