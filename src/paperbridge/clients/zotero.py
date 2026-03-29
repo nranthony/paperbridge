@@ -9,6 +9,7 @@ Requires the ``[zotero]`` optional dependency group::
 """
 
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 from paperbridge._logging import get_logger
@@ -519,9 +520,232 @@ class ZoteroClient:
 
         return self.create_items(items_to_create)
 
+    def upload_bib(
+        self,
+        bib: "str | Path",
+        collection_key: Optional[str] = None,
+        new_collection_name: Optional[str] = None,
+        parent_collection_key: Optional[str] = None,
+        skip_existing: bool = True,
+        tags: Optional[list[str]] = None,
+    ) -> ZoteroSyncResult:
+        """Import a BibTeX file or string into the Zotero library.
+
+        Mirrors the behaviour of Zotero's UI Import function.  Each BibTeX
+        entry is converted to a ``ZoteroItemData`` and created via the API.
+        BibTeX ``keywords`` fields are merged with any extra ``tags`` you
+        supply and stored as Zotero tags on the item.
+
+        Parameters
+        ----------
+        bib : str or Path
+            BibTeX content as a string, or a ``Path`` to a ``.bib`` file.
+        collection_key : str, optional
+            Key of an existing collection to add all imported items to.
+            Mutually exclusive with ``new_collection_name``.
+        new_collection_name : str, optional
+            Create a new collection with this name and add all items to it.
+            Mutually exclusive with ``collection_key``.
+        parent_collection_key : str, optional
+            When creating a new collection, nest it under this parent key.
+        skip_existing : bool
+            If ``True`` (default), skip any entry whose DOI is already in
+            the library.
+        tags : list[str], optional
+            Extra tags applied to every imported item.
+
+        Returns
+        -------
+        ZoteroSyncResult
+            ``.created_keys`` — Zotero keys of newly created items.
+            ``.failed`` — entries that could not be created.
+            ``.total_attempted`` — total entries parsed from the BibTeX.
+
+        Examples
+        --------
+        >>> # Import into an existing collection
+        >>> result = zot.upload_bib(Path("library.bib"), collection_key="ABC123")
+
+        >>> # Import and create a new top-level collection
+        >>> result = zot.upload_bib("@article{...}", new_collection_name="Imported 2026-03")
+
+        >>> # Import into a nested sub-collection
+        >>> result = zot.upload_bib(
+        ...     Path("library.bib"),
+        ...     new_collection_name="Wave 2",
+        ...     parent_collection_key="PARENTKEY",
+        ... )
+        """
+        try:
+            import bibtexparser
+        except ImportError:
+            raise ImportError(
+                "bibtexparser is required for upload_bib. "
+                "Install it with: pip install paperbridge[bibtex]"
+            )
+
+        if collection_key and new_collection_name:
+            raise ValueError("Provide collection_key or new_collection_name, not both.")
+
+        # Read file if a path was given
+        bib_str = Path(bib).read_text(encoding="utf-8") if isinstance(bib, Path) else bib
+
+        db = bibtexparser.loads(bib_str)
+        entries = db.entries
+        logger.info(f"Parsed {len(entries)} entries from BibTeX")
+
+        # Resolve target collection key
+        target_collection_key: Optional[str] = collection_key
+        if new_collection_name:
+            col = self.create_collection(new_collection_name, parent_key=parent_collection_key)
+            target_collection_key = col.key
+            logger.info(f"Created collection '{new_collection_name}' (key={col.key})")
+
+        collection_keys = [target_collection_key] if target_collection_key else None
+
+        result = ZoteroSyncResult(total_attempted=len(entries))
+        items_to_create: list[ZoteroItemData] = []
+
+        for entry in entries:
+            item_data = self._bibtex_entry_to_item_data(entry, collection_keys=collection_keys, extra_tags=tags or [])
+
+            if skip_existing and item_data.doi:
+                if self.find_item_by_doi(item_data.doi):
+                    logger.info(f"Skipping existing DOI: {item_data.doi}")
+                    continue
+
+            items_to_create.append(item_data)
+
+        if not items_to_create:
+            logger.info("No new items to import")
+            return result
+
+        batch_result = self.create_items(items_to_create)
+        result.created_keys = batch_result.created_keys
+        result.failed = batch_result.failed
+        return result
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    # BibTeX ENTRYTYPE → Zotero itemType
+    _BIBTEX_ITEM_TYPE_MAP: dict[str, str] = {
+        "article": "journalArticle",
+        "book": "book",
+        "booklet": "book",
+        "inbook": "bookSection",
+        "incollection": "bookSection",
+        "inproceedings": "conferencePaper",
+        "conference": "conferencePaper",
+        "phdthesis": "thesis",
+        "mastersthesis": "thesis",
+        "techreport": "report",
+        "preprint": "preprint",
+        "misc": "journalArticle",
+        "unpublished": "journalArticle",
+    }
+
+    # BibTeX fields that map to ZoteroItemData model_extra (item-type-specific)
+    _BIBTEX_EXTRA_FIELDS: list[tuple[str, str]] = [
+        ("publisher", "publisher"),
+        ("address", "place"),
+        ("edition", "edition"),
+        ("isbn", "ISBN"),
+        ("language", "language"),
+        ("booktitle", "bookTitle"),
+        ("series", "seriesTitle"),
+    ]
+
+    def _bibtex_entry_to_item_data(
+        self,
+        entry: dict[str, Any],
+        collection_keys: Optional[list[str]] = None,
+        extra_tags: Optional[list[str]] = None,
+    ) -> ZoteroItemData:
+        """Convert a bibtexparser entry dict to ``ZoteroItemData``.
+
+        Handles author parsing (``Last, First and ...`` format), BibTeX
+        keyword splitting, and maps field names to Zotero's schema.
+        Item-type-specific fields (publisher, address, etc.) are passed
+        through via ``model_extra`` using Pydantic's ``extra="allow"``.
+        """
+        item_type = self._BIBTEX_ITEM_TYPE_MAP.get(
+            entry.get("ENTRYTYPE", "article").lower(), "journalArticle"
+        )
+
+        # --- Creators ---
+        creators: list[ZoteroCreator] = []
+        for field, role in (("author", "author"), ("editor", "editor")):
+            raw_names = entry.get(field, "")
+            if not raw_names:
+                continue
+            for name in re.split(r"\s+and\s+", raw_names, flags=re.IGNORECASE):
+                name = name.strip()
+                if not name:
+                    continue
+                if "," in name:
+                    last, _, first = name.partition(",")
+                    creators.append(
+                        ZoteroCreator(
+                            creator_type=role,
+                            last_name=last.strip(),
+                            first_name=first.strip() or None,
+                        )
+                    )
+                else:
+                    parts = name.split()
+                    creators.append(
+                        ZoteroCreator(
+                            creator_type=role,
+                            last_name=parts[-1],
+                            first_name=" ".join(parts[:-1]) or None,
+                        )
+                    )
+
+        # --- Tags: BibTeX keywords + caller-supplied extras ---
+        tag_set: list[str] = []
+        seen: set[str] = set()
+        raw_kw = entry.get("keywords", "")
+        kw_list = [k.strip() for k in re.split(r"[,;]", raw_kw) if k.strip()]
+        for t in kw_list + (extra_tags or []):
+            if t not in seen:
+                seen.add(t)
+                tag_set.append(t)
+        tags = [ZoteroTag(tag=t) for t in tag_set]
+
+        # --- Date: prefer 'year', fall back to 'date' ---
+        date = entry.get("year") or entry.get("date") or None
+
+        # --- item-type-specific extras via model_extra ---
+        extra_kwargs: dict[str, Any] = {}
+        for bib_field, zotero_field in self._BIBTEX_EXTRA_FIELDS:
+            val = entry.get(bib_field)
+            if val:
+                extra_kwargs[zotero_field] = val
+
+        # --- note/annote → extra field ---
+        note_parts = [p for p in (entry.get("note"), entry.get("annote")) if p]
+        extra_str = "\n".join(note_parts) or None
+
+        return ZoteroItemData(
+            item_type=item_type,
+            title=entry.get("title"),
+            creators=creators,
+            abstract_note=entry.get("abstract"),
+            publication_title=entry.get("journal") or entry.get("journaltitle"),
+            volume=entry.get("volume"),
+            issue=entry.get("number") or entry.get("issue"),
+            pages=entry.get("pages"),
+            date=date,
+            doi=entry.get("doi") or entry.get("DOI"),
+            issn=entry.get("issn") or entry.get("ISSN"),
+            url=entry.get("url"),
+            tags=tags,
+            collections=collection_keys or [],
+            extra=extra_str,
+            **extra_kwargs,
+        )
 
     def _dict_to_item(self, raw: dict[str, Any]) -> ZoteroItem:
         """Convert a pyzotero item dict to a ZoteroItem model."""

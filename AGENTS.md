@@ -24,6 +24,7 @@ Read this alongside `CLAUDE.md` (architecture) and `README.md` (install/config).
 | Look up DOI from title | `CrossRefClient.get_doi_from_title(title, author, year)` |
 | Read/write Zotero library | `ZoteroClient` |
 | Export Zotero items to BibTeX | `item.to_bibtex()` on any `ZoteroItem` |
+| Import a .bib file into Zotero | `ZoteroClient.upload_bib(path_or_str)` |
 
 ---
 
@@ -258,6 +259,17 @@ with ZoteroClient(api_key=API_KEY, group_id=GROUP_ID) as zot:
     zot.add_tags_to_item("ITEMKEY", ["reviewed", "HRV"])         # merges, does not replace
     zot.update_item("ITEMKEY", ZoteroItemData(extra="my note"))  # partial update — only sets extra
     zot.add_item_to_collection("ITEMKEY", col.key)
+
+    # Import a .bib file or BibTeX string (mirrors Zotero UI Import)
+    result = zot.upload_bib(
+        Path("library.bib"),              # or a raw BibTeX string
+        collection_key="EXISTINGKEY",     # add to existing collection  — OR —
+        new_collection_name="Wave 2",     # create new collection (mutually exclusive)
+        parent_collection_key="PARENT",   # nest new collection under parent (optional)
+        skip_existing=True,               # skip entries whose DOI is already in library
+        tags=["batch-import"],            # extra tags on every imported item
+    )
+    # BibTeX keywords field is automatically split and added as Zotero tags
 
     # Sync ArticleRecords from CitationAggregator into Zotero
     sync_result = zot.sync_article_records(

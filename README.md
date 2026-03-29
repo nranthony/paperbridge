@@ -37,7 +37,7 @@ Requires Python 3.12+.
 | `DOIResolverClient` | DOI → URL resolution |
 | `PublicationDownloaderClient` | PDF download orchestration |
 | `DocumentParserClient` | PDF → structured text extraction |
-| `ZoteroClient` | Read/write Zotero user and group libraries |
+| `ZoteroClient` | Read/write Zotero user and group libraries; BibTeX import |
 
 ## Usage
 
@@ -84,6 +84,15 @@ with ZoteroClient(api_key="...", user_id="67890") as zot:
 # Sync paperbridge results into Zotero
 with ZoteroClient(api_key="...", group_id="12345") as zot:
     zot.sync_article_records(records, collection_key="ABC123", tags=["imported"])
+
+# Import a .bib file (mirrors Zotero UI Import)
+with ZoteroClient(api_key="...", group_id="12345") as zot:
+    result = zot.upload_bib(
+        Path("library.bib"),
+        new_collection_name="Imported 2026",  # creates collection automatically
+        skip_existing=True,
+    )
+    print(f"Created {len(result.created_keys)} items")
 ```
 
 ### Keyword aggregation

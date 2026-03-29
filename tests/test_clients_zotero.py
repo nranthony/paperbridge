@@ -504,3 +504,168 @@ class TestZoteroModels:
         assert ZoteroClient._extract_pmid_from_extra("Some note\nPMID: 99999") == "99999"
         assert ZoteroClient._extract_pmid_from_extra("No PMID here") is None
         assert ZoteroClient._extract_pmid_from_extra(None) is None
+
+
+class TestUploadBib:
+    BIB = """
+@article{smith2024,
+  title     = {Heart Rate Variability in Children},
+  author    = {Smith, Jane and Doe, John},
+  journal   = {Psychophysiology},
+  year      = {2024},
+  volume    = {61},
+  number    = {3},
+  pages     = {e14500},
+  doi       = {10.1111/psyp.14500},
+  issn      = {0048-5772},
+  abstract  = {We studied HRV.},
+  keywords  = {HRV, children, autonomic},
+}
+
+@article{jones2023,
+  title   = {No DOI Article},
+  author  = {Jones, Bob},
+  journal = {Nature},
+  year    = {2023},
+}
+"""
+
+    def test_bibtex_entry_to_item_data_fields(self):
+        client = _make_client()
+        import bibtexparser
+        entries = bibtexparser.loads(self.BIB).entries
+        item_data = client._bibtex_entry_to_item_data(entries[0], extra_tags=["imported"])
+
+        assert item_data.item_type == "journalArticle"
+        assert item_data.title == "Heart Rate Variability in Children"
+        assert item_data.publication_title == "Psychophysiology"
+        assert item_data.volume == "61"
+        assert item_data.issue == "3"
+        assert item_data.pages == "e14500"
+        assert item_data.doi == "10.1111/psyp.14500"
+        assert item_data.issn == "0048-5772"
+        assert item_data.abstract_note == "We studied HRV."
+        assert item_data.date == "2024"
+
+        tag_names = [t.tag for t in item_data.tags]
+        assert "HRV" in tag_names
+        assert "children" in tag_names
+        assert "autonomic" in tag_names
+        assert "imported" in tag_names
+
+    def test_bibtex_entry_to_item_data_authors(self):
+        client = _make_client()
+        import bibtexparser
+        entries = bibtexparser.loads(self.BIB).entries
+        item_data = client._bibtex_entry_to_item_data(entries[0])
+
+        assert len(item_data.creators) == 2
+        assert item_data.creators[0].last_name == "Smith"
+        assert item_data.creators[0].first_name == "Jane"
+        assert item_data.creators[1].last_name == "Doe"
+        assert item_data.creators[1].first_name == "John"
+
+    def test_upload_bib_creates_items(self):
+        client = _make_client()
+        client._zot.item_template.return_value = {
+            "itemType": "journalArticle", "title": "", "creators": [],
+            "tags": [], "collections": [],
+        }
+        client._zot.create_items.return_value = {
+            "successful": {"0": {"key": "NEW0001"}, "1": {"key": "NEW0002"}},
+            "failed": {},
+        }
+        # find_item_by_doi → not found (so nothing skipped)
+        client._zot.items.return_value = []
+        client._zot.request = MagicMock()
+        client._zot.request.headers = {"Total-Results": "0"}
+
+        result = client.upload_bib(self.BIB)
+
+        assert len(result.created_keys) == 2
+        assert not result.failed
+        assert result.total_attempted == 2
+
+    def test_upload_bib_skip_existing(self):
+        from paperbridge.models.zotero import ZoteroItem, ZoteroItemData as ZID
+        client = _make_client()
+
+        # find_item_by_doi returns a hit for the first DOI only
+        existing = MagicMock(spec=ZoteroItem)
+        existing.data = ZID(doi="10.1111/psyp.14500")
+
+        call_count = {"n": 0}
+        def _fake_get_items(**kwargs):
+            call_count["n"] += 1
+            if "10.1111/psyp.14500" in str(kwargs.get("q", "")):
+                mock_result = MagicMock()
+                mock_result.items = [existing]
+                return mock_result
+            mock_result = MagicMock()
+            mock_result.items = []
+            return mock_result
+
+        client.get_items = _fake_get_items
+        client._zot.item_template.return_value = {
+            "itemType": "journalArticle", "title": "", "creators": [],
+            "tags": [], "collections": [],
+        }
+        client._zot.create_items.return_value = {
+            "successful": {"0": {"key": "NEW0002"}},
+            "failed": {},
+        }
+
+        result = client.upload_bib(self.BIB, skip_existing=True)
+
+        # Only the no-DOI article (jones2023) gets created; smith2024 is skipped
+        assert len(result.created_keys) == 1
+
+    def test_upload_bib_new_collection(self):
+        client = _make_client()
+        client._zot.create_collections.return_value = {
+            "successful": {"0": {"key": "NEWCOL1", "version": 1,
+                                  "data": {"key": "NEWCOL1", "name": "My Import",
+                                           "parentCollection": False}}},
+            "failed": {},
+        }
+        client._zot.item_template.return_value = {
+            "itemType": "journalArticle", "title": "", "creators": [],
+            "tags": [], "collections": [],
+        }
+        client._zot.create_items.return_value = {
+            "successful": {"0": {"key": "NEW0001"}, "1": {"key": "NEW0002"}},
+            "failed": {},
+        }
+        client._zot.items.return_value = []
+        client._zot.request = MagicMock()
+        client._zot.request.headers = {"Total-Results": "0"}
+
+        result = client.upload_bib(self.BIB, new_collection_name="My Import")
+
+        client._zot.create_collections.assert_called_once()
+        assert len(result.created_keys) == 2
+
+    def test_upload_bib_mutual_exclusion(self):
+        client = _make_client()
+        import pytest
+        with pytest.raises(ValueError, match="not both"):
+            client.upload_bib(self.BIB, collection_key="ABC", new_collection_name="New")
+
+    def test_upload_bib_from_path(self, tmp_path):
+        client = _make_client()
+        bib_file = tmp_path / "test.bib"
+        bib_file.write_text(self.BIB, encoding="utf-8")
+        client._zot.item_template.return_value = {
+            "itemType": "journalArticle", "title": "", "creators": [],
+            "tags": [], "collections": [],
+        }
+        client._zot.create_items.return_value = {
+            "successful": {"0": {"key": "A"}, "1": {"key": "B"}},
+            "failed": {},
+        }
+        client._zot.items.return_value = []
+        client._zot.request = MagicMock()
+        client._zot.request.headers = {"Total-Results": "0"}
+
+        result = client.upload_bib(bib_file)
+        assert len(result.created_keys) == 2

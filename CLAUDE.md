@@ -34,7 +34,7 @@ Two client hierarchies exist side-by-side:
 
 1. **`BaseAPIClient` subclasses** (`clients/_base.py`) — DOI-oriented clients that implement any subset of `fetch_keywords`, `fetch_abstract`, `fetch_metadata`, `fetch_full_text`. Currently: `CrossRefClient`, `EuropePMCClient`, `OpenAlexClient`, `PubMedClient`.
 
-2. **Standalone search clients** — not DOI-driven; operate independently. Currently: `ArXivFamilyClient`, `BASESearchClient`, `DOIResolverClient`, `UnpaywallClient`, `PublicationDownloaderClient`, `DocumentParserClient`, `ZoteroClient`.
+2. **Standalone search clients** — not DOI-driven; operate independently. Currently: `ArXivFamilyClient`, `BASESearchClient`, `DOIResolverClient`, `UnpaywallClient`, `PublicationDownloaderClient`, `DocumentParserClient`, `ZoteroClient` (also supports BibTeX import via `upload_bib`).
 
 `CitationAggregator` (`aggregator.py`) owns a list of `BaseAPIClient` instances and fans out DOI lookups across all of them, merging results into an `ArticleRecord`.
 

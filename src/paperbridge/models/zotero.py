@@ -25,9 +25,9 @@ class ZoteroItemType(str, Enum):
 class ZoteroCreator(BaseModel):
     """A single creator (author, editor, etc.) on a Zotero item."""
 
-    creator_type: str = Field("author", validation_alias="creatorType", serialization_alias="creatorType")
-    first_name: Optional[str] = Field(None, validation_alias="firstName", serialization_alias="firstName")
-    last_name: Optional[str] = Field(None, validation_alias="lastName", serialization_alias="lastName")
+    creator_type: str = Field(default="author", validation_alias="creatorType", serialization_alias="creatorType")
+    first_name: Optional[str] = Field(default=None, validation_alias="firstName", serialization_alias="firstName")
+    last_name: Optional[str] = Field(default=None, validation_alias="lastName", serialization_alias="lastName")
     name: Optional[str] = None  # single-field name for institutional authors
 
     model_config = ConfigDict(populate_by_name=True)
@@ -58,23 +58,23 @@ class ZoteroItemData(BaseModel):
 
     key: Optional[str] = None
     version: Optional[int] = None
-    item_type: str = Field("journalArticle", validation_alias="itemType", serialization_alias="itemType")
+    item_type: str = Field(default="journalArticle", validation_alias="itemType", serialization_alias="itemType")
     title: Optional[str] = None
     creators: list[ZoteroCreator] = Field(default_factory=list)
-    abstract_note: Optional[str] = Field(None, validation_alias="abstractNote", serialization_alias="abstractNote")
-    publication_title: Optional[str] = Field(None, validation_alias="publicationTitle", serialization_alias="publicationTitle")
+    abstract_note: Optional[str] = Field(default=None, validation_alias="abstractNote", serialization_alias="abstractNote")
+    publication_title: Optional[str] = Field(default=None, validation_alias="publicationTitle", serialization_alias="publicationTitle")
     volume: Optional[str] = None
     issue: Optional[str] = None
     pages: Optional[str] = None
     date: Optional[str] = None
-    doi: Optional[str] = Field(None, validation_alias="DOI", serialization_alias="DOI")
-    issn: Optional[str] = Field(None, validation_alias="ISSN", serialization_alias="ISSN")
+    doi: Optional[str] = Field(default=None, validation_alias="DOI", serialization_alias="DOI")
+    issn: Optional[str] = Field(default=None, validation_alias="ISSN", serialization_alias="ISSN")
     url: Optional[str] = None
     tags: list[ZoteroTag] = Field(default_factory=list)
     collections: list[str] = Field(default_factory=list)
     relations: dict[str, Any] = Field(default_factory=dict)
-    date_added: Optional[str] = Field(None, validation_alias="dateAdded", serialization_alias="dateAdded")
-    date_modified: Optional[str] = Field(None, validation_alias="dateModified", serialization_alias="dateModified")
+    date_added: Optional[str] = Field(default=None, validation_alias="dateAdded", serialization_alias="dateAdded")
+    date_modified: Optional[str] = Field(default=None, validation_alias="dateModified", serialization_alias="dateModified")
     extra: Optional[str] = None  # Zotero "Extra" field; used for PMID etc.
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
@@ -225,7 +225,7 @@ class ZoteroCollection(BaseModel):
     key: str
     version: int
     name: str
-    parent_collection: Optional[str] = Field(None, validation_alias="parentCollection", serialization_alias="parentCollection")
+    parent_collection: Optional[str] = Field(default=None, validation_alias="parentCollection", serialization_alias="parentCollection")
     data: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(populate_by_name=True, extra="allow")
